@@ -1,0 +1,4 @@
+com\archer\Main.class
+com\archer\gui\AssistantGUI.class
+com\archer\voice\VoiceInput.class
+com\archer\actions\ActionExecutor.class
