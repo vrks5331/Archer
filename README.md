@@ -1,4 +1,4 @@
-# Archer
+# Archer | HackRU F25
 
 ## Overview
 Archer is a Java-based desktop AI assistant that allows users to interact with their computer using natural language voice commands or text input. It leverages advanced generative AI, speech recognition, and system automation to execute tasks on your PC while providing real-time, intelligent feedback through a clean and responsive GUI.
