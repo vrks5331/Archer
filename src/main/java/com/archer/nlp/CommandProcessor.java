@@ -14,7 +14,6 @@ public class CommandProcessor {
 
     private final Client geminiClient;
     private final ExecutorService executor;
-    private JsonParser jp = new JsonParser();
 
     public CommandProcessor() {
         String apiKey = System.getenv("GEMINI_API_KEY");
@@ -27,9 +26,10 @@ public class CommandProcessor {
     }
 
     public void processCommand(String command, Consumer<String> guiCallback) {
+        System.out.println("Processing command: " + command);
         executor.submit(() -> {
             try {
-                // === 1. Classify the command ===
+                // classify the command
                 String classificationPrompt = String.format(
                         "Classify the following user command as either 'LOCAL' (for system/PC control) or 'AI'. "
                                 + "Reply ONLY with 'LOCAL' or 'AI'. Command: '%s'",
@@ -42,7 +42,7 @@ public class CommandProcessor {
 
                 String classification = classificationResponse.text().trim().toUpperCase();
 
-                // === 2. Handle local system commands ===
+                // handle local system commands
                 if (classification.equals("LOCAL")) {
 
                     String jsonPrompt = String.format("""
@@ -67,16 +67,16 @@ public class CommandProcessor {
                             null);
 
                     String json = jsonResponse.text().trim();
-                    JsonObject obj = jp.parseString(json).getAsJsonObject();
+                    JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
 
                     String action = obj.has("action") ? obj.get("action").getAsString() : null;
                     String target = obj.has("target") ? obj.get("target").getAsString() : null;
                     String value = obj.has("value") ? obj.get("value").getAsString() : null;
 
-                    // === 3. Execute local action ===
+                    // execute local action
                     String result = ActionExecutor.execute(action, target, value);
 
-                    // === 4. Generate confirmation ===
+                    // generate confirmation
                     String confirmationPrompt = String.format(
                             "As Archer, confirm you executed the action: '%s'. Be concise and professional.",
                             result);
@@ -90,7 +90,7 @@ public class CommandProcessor {
 
             } catch (Exception e) {
                 e.printStackTrace();
-                guiCallback.accept("Archer: Sorry, something went wrong.");
+                guiCallback.accept("Archer: Error while processing command: " + e.getMessage());
             }
         });
     }

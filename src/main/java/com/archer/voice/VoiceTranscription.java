@@ -54,7 +54,10 @@ public class VoiceTranscription {
                         String textChunk = "";
 
                         if (recognizer.acceptWaveForm(buffer, bytesRead)) {
-                            textChunk = recognizer.getResult(); // final result
+                            textChunk = recognizer.getResult();
+                            System.out.println("Raw recognizer output: " + textChunk);
+                            
+                            // final result
                             finalText.append(extractText(textChunk)).append(" ");
                             callback.accept("You: " + finalText.toString().trim(), true);
                         } else {
@@ -64,7 +67,8 @@ public class VoiceTranscription {
                     }
 
                     if (System.currentTimeMillis() - lastVoiceTime > SILENCE_DURATION_MS) {
-                        callback.accept("Archer: (stopped listening)", true);
+                        callback.accept(recognizer.getResult(), true);
+                        System.out.println("Archer: (offline due to silence)");
                         targetLine.stop();
                         targetLine.close();
                         recognizer.close();
@@ -96,7 +100,20 @@ public class VoiceTranscription {
             int start = voskJson.indexOf("\"", idx + 7) + 1;
             int end = voskJson.indexOf("\"", start);
             if (start >= 0 && end > start) return voskJson.substring(start, end);
+            
         }
         return "";
     }
+
+    public void stopListening() {
+        try {
+            if (targetLine != null && targetLine.isOpen()) {
+                targetLine.stop();
+                targetLine.close();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
 }

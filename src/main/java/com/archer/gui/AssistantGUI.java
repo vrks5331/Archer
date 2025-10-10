@@ -20,6 +20,7 @@ public class AssistantGUI extends Application {
     private VBox chatBox;
     private VoiceInput voiceInput;
     private Label currentUserLabel;
+    private boolean isRunning = false;
 
     @Override
     public void start(Stage stage) {
@@ -43,7 +44,17 @@ public class AssistantGUI extends Application {
         micButton.setMinSize(50, 50);
         micButton.setMaxSize(50, 50);
         micButton.setStyle("-fx-background-color: crimson; -fx-text-fill: white; -fx-font-size: 20px;");
-        micButton.setOnAction(e -> transcribeSpeech()); // for now just test message
+        micButton.setOnAction(e -> {
+            if (!isRunning) {
+                isRunning = true;
+                transcribeSpeech();
+            } else {
+                isRunning = false;
+                voiceInput.stop();
+                chatBox.getChildren().add(new Label("Archer: (manually stopped listening)"));
+            }
+        });
+
 
         // Layout
         VBox layout = new VBox(20, title, scrollPane, micButton);
@@ -63,10 +74,10 @@ public class AssistantGUI extends Application {
     private boolean listening = false;
 
 private void transcribeSpeech() {
-    if (listening) return;
     listening = true;
+    System.out.println("Listening: " + listening);
 
-    Label status = new Label("Say 'Hey Archer' to start...");
+    Label status = new Label("Say 'Trace, on' to start...");
     chatBox.getChildren().add(status);
 
     voiceInput.start(text -> {
@@ -94,8 +105,6 @@ private void transcribeSpeech() {
         });
     });
 }
-
-
 
     public static void main(String[] args) {
         launch();

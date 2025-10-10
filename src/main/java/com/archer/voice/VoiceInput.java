@@ -13,25 +13,32 @@ public class VoiceInput {
             this.transcription = new VoiceTranscription();
         } catch (Exception e) {
             e.printStackTrace();
+            throw new RuntimeException("Failed to initialize voice transcription: " + e.getMessage());
         }
     }
 
     public void start(Consumer<String> guiCallback) {
-    transcription.startListening((text, isFinal) -> {
-        if (isFinal) {
-            // prepend "You: " for final bubble
-            String finalText = "You: " + text;
-            guiCallback.accept(finalText);
-
-            String command = text.trim();
-            if (!command.isEmpty()) {
-                commandProcessor.processCommand(command, guiCallback);
+        transcription.startListening((text, isFinal) -> {
+            if (isFinal) {
+                String cleaned = text.trim();
+                if (cleaned.isEmpty() || cleaned.length() < 2) {
+                    return; // ignore noise
+                }
+                guiCallback.accept("You: " + cleaned);
+                commandProcessor.processCommand(cleaned, guiCallback);
+            } else {
+                if (text != null && !text.trim().isEmpty()) {
+                    // partial text, send as is
+                    guiCallback.accept("You (partial): " + text.trim());
+                }
             }
-        } else {
-            // partial text, send as is
-            guiCallback.accept(text);
+        });
+    }
+
+    public void stop() {
+        if (transcription != null) {
+            transcription.stopListening();
         }
-    });
-}
+    }
 
 }
