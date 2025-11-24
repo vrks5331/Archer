@@ -85,6 +85,12 @@
                 <configuration>
                     <mainClass>com.archer.gui.AssistantGUI</mainClass>
                     <cleanupDaemonThreads>false</cleanupDaemonThreads>
+                    <systemProperties>
+                        <property>
+                            <name>vosk.model.path</name>
+                            <value>${env.VOSK_MODEL_PATH}</value>
+                        </property>
+                    </systemProperties>
                     <arguments>
                         <argument>--module-path</argument>
                         <argument>C:\Users\srive\openjfx-25_windows-x64_bin-sdk\javafx-sdk-25\lib</argument>

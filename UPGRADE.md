@@ -20,6 +20,15 @@ mvn -version
 4. CI
    - Update your CI runner to use Java 21 (or newer) to match the `--release 21` compile target.
 
+6. Vosk model path
+   - You can set the Vosk model path using the `VOSK_MODEL_PATH` environment variable or the system property `-Dvosk.model.path=...` when running with Maven.
+   - Example (PowerShell):
+```
+setx VOSK_MODEL_PATH "C:\\path\\to\\vosk-model"
+$env:VOSK_MODEL_PATH = "C:\\path\\to\\vosk-model"
+mvn exec:java
+```
+
 5. Notes
    - The POM now sets `maven.compiler.source`/`target` to `21` and configures the `maven-compiler-plugin` with `<release>21</release>`.
    - Building with a newer JDK (e.g., 25) is fine when `--release 21` is used, but CI should still use JDK 21 to match runtime expectations.
