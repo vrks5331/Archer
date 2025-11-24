@@ -8,7 +8,6 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
@@ -20,7 +19,6 @@ public class AssistantGUI extends Application {
     private VBox chatBox;
     private VoiceInput voiceInput;
     private Label currentUserLabel;
-    private boolean isRunning = false;
 
     @Override
     public void start(Stage stage) {
@@ -38,26 +36,12 @@ public class AssistantGUI extends Application {
         scrollPane.setFitToWidth(true);
         scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
 
-        // Microphone button
-        Button micButton = new Button("🎤");
-        micButton.setShape(new Circle(25));
-        micButton.setMinSize(50, 50);
-        micButton.setMaxSize(50, 50);
-        micButton.setStyle("-fx-background-color: crimson; -fx-text-fill: white; -fx-font-size: 20px;");
-        micButton.setOnAction(e -> {
-            if (!isRunning) {
-                isRunning = true;
-                transcribeSpeech();
-            } else {
-                isRunning = false;
-                voiceInput.stop();
-                chatBox.getChildren().add(new Label("Archer: (manually stopped listening)"));
-            }
-        });
-
+        // Status label to show voice activation status
+        Label statusLabel = new Label("Say 'Trace, on' to activate voice commands");
+        statusLabel.setStyle("-fx-text-fill: gray; -fx-font-size: 12px;");
 
         // Layout
-        VBox layout = new VBox(20, title, scrollPane, micButton);
+        VBox layout = new VBox(20, title, scrollPane, statusLabel);
         layout.setAlignment(Pos.CENTER);
         layout.setPadding(new Insets(20));
 
@@ -67,44 +51,64 @@ public class AssistantGUI extends Application {
         stage.show();
 
         // initialize NLP processor and voice input once GUI is loaded
+        System.out.println("GUI: Initializing CommandProcessor...");
         CommandProcessor cp = new CommandProcessor();
+        System.out.println("GUI: Initializing VoiceInput...");
         voiceInput = new VoiceInput(cp);
-    }
+        System.out.println("GUI: Starting voice input...");
+        
+        // Add initial status message
+        Label initLabel = new Label("Archer: Initializing voice input...");
+        initLabel.setStyle("-fx-background-color: #ffe0e0; -fx-padding: 8; -fx-background-radius: 8;");
+        chatBox.getChildren().add(initLabel);
+        
+        // Start voice input automatically (will wait for "trace, on")
+        voiceInput.start(text -> {
+            Platform.runLater(() -> {
+                if (text == null) return;
 
-    private boolean listening = false;
-
-private void transcribeSpeech() {
-    listening = true;
-    System.out.println("Listening: " + listening);
-
-    Label status = new Label("Say 'Trace, on' to start...");
-    chatBox.getChildren().add(status);
-
-    voiceInput.start(text -> {
-        Platform.runLater(() -> {
-            if (text.startsWith("Archer:") || text.equals("(stopped listening)")) {
-                Label botLabel = new Label(text);
-                botLabel.setStyle("-fx-background-color: #ffe0e0; -fx-padding: 8; -fx-background-radius: 8;");
-                chatBox.getChildren().add(botLabel);
-            } else {
-                // user text
-                if (currentUserLabel == null || text.equals("(stopped listening)")) {
-                    currentUserLabel = new Label("You: " + text);
-                    currentUserLabel.setStyle("-fx-background-color: lightgray; -fx-padding: 8; -fx-background-radius: 8;");
-                    chatBox.getChildren().add(currentUserLabel);
+                // Update status label based on activation state
+                if (voiceInput.isActive()) {
+                    statusLabel.setText("Voice activated - Listening for commands...");
+                    statusLabel.setStyle("-fx-text-fill: green; -fx-font-size: 12px;");
                 } else {
-                    // update same bubble for partial text
-                    currentUserLabel.setText("You: " + text);
+                    statusLabel.setText("Say 'Trace, on' to activate voice commands");
+                    statusLabel.setStyle("-fx-text-fill: gray; -fx-font-size: 12px;");
                 }
 
-                // reset label when final speech ends
-                if (text.equals("(stopped listening)")) {
+                // Assistant/system messages (already formatted)
+                if (text.startsWith("Archer:") || text.equals("(stopped listening)")) {
+                    Label botLabel = new Label(text);
+                    botLabel.setStyle("-fx-background-color: #ffe0e0; -fx-padding: 8; -fx-background-radius: 8;");
+                    chatBox.getChildren().add(botLabel);
+                    return;
+                }
+
+                // User messages come prefixed by VoiceInput: "You (partial): ..." or "You: ..."
+                if (text.startsWith("You (partial): ")) {
+                    if (currentUserLabel == null) {
+                        currentUserLabel = new Label(text);
+                        currentUserLabel.setStyle("-fx-background-color: lightgray; -fx-padding: 8; -fx-background-radius: 8;");
+                        chatBox.getChildren().add(currentUserLabel);
+                    } else {
+                        currentUserLabel.setText(text);
+                    }
+                } else if (text.startsWith("You: ")) {
+                    // final user message — display as a final bubble and clear currentUserLabel
+                    Label userLabel = new Label(text);
+                    userLabel.setStyle("-fx-background-color: lightgray; -fx-padding: 8; -fx-background-radius: 8;");
+                    chatBox.getChildren().add(userLabel);
+                    currentUserLabel = null;
+                } else {
+                    // fallback: treat as final user text
+                    Label userLabel = new Label("You: " + text);
+                    userLabel.setStyle("-fx-background-color: lightgray; -fx-padding: 8; -fx-background-radius: 8;");
+                    chatBox.getChildren().add(userLabel);
                     currentUserLabel = null;
                 }
-            }
+            });
         });
-    });
-}
+    }
 
     public static void main(String[] args) {
         launch();

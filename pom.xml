@@ -86,10 +86,10 @@
                     <mainClass>com.archer.gui.AssistantGUI</mainClass>
                     <cleanupDaemonThreads>false</cleanupDaemonThreads>
                     <systemProperties>
-                        <property>
-                            <name>vosk.model.path</name>
+                        <systemProperty>
+                            <key>vosk.model.path</key>
                             <value>${env.VOSK_MODEL_PATH}</value>
-                        </property>
+                        </systemProperty>
                     </systemProperties>
                     <arguments>
                         <argument>--module-path</argument>
