@@ -97,13 +97,17 @@ public class CommandProcessor {
 
     private void streamGeminiResponse(String model, String prompt, Consumer<String> guiCallback) {
         executor.submit(() -> {
+            StringBuilder fullResponse = new StringBuilder();
             geminiClient.models.generateContentStream(model, prompt, null)
                     .forEach(responsePart -> {
                         String textChunk = responsePart.text();
                         if (textChunk != null && !textChunk.isEmpty()) {
-                            guiCallback.accept("Archer: " + textChunk);
+                            fullResponse.append(textChunk);
                         }
                     });
+            if (fullResponse.length() > 0) {
+                guiCallback.accept("Archer: " + fullResponse.toString().trim());
+            }
         });
     }
 
