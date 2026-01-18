@@ -26,9 +26,32 @@ public class CommandProcessor {
     }
 
     public void processCommand(String command, Consumer<String> guiCallback) {
-        System.out.println("Processing command: " + command);
+        System.out.println("CommandProcessor: processCommand() called with command: '" + command + "'");
+        System.out.println("CommandProcessor: guiCallback is null? " + (guiCallback == null));
+        System.out.println("CommandProcessor: geminiClient is null? " + (geminiClient == null));
+        System.out.println("CommandProcessor: executor is null? " + (executor == null));
+        
+        if (guiCallback == null) {
+            System.err.println("CommandProcessor: ERROR - guiCallback is null!");
+            return;
+        }
+        
+        if (geminiClient == null) {
+            System.err.println("CommandProcessor: ERROR - geminiClient is null!");
+            guiCallback.accept("Archer: Error - Gemini client not initialized. Check GEMINI_API_KEY.");
+            return;
+        }
+        
+        System.out.println("CommandProcessor: Submitting task to executor...");
+        System.out.println("CommandProcessor: Executor shutdown? " + executor.isShutdown());
+        System.out.println("CommandProcessor: Executor terminated? " + executor.isTerminated());
+        
         executor.submit(() -> {
+            System.out.println("CommandProcessor: ===== EXECUTOR THREAD STARTED =====");
+            System.out.println("CommandProcessor: Thread name: " + Thread.currentThread().getName());
             try {
+                System.out.println("CommandProcessor: Starting command processing in executor thread...");
+                System.out.println("CommandProcessor: Command to process: '" + command + "'");
                 // Combined prompt: classify and generate JSON in one call for speed
                 String combinedPrompt = String.format("""
                         Analyze the following user command and respond with JSON.
@@ -72,12 +95,43 @@ public class CommandProcessor {
                         Command: %s
                         """, command, command);
 
-                GenerateContentResponse response = geminiClient.models.generateContent(
-                        "gemini-2.5-flash",
-                        combinedPrompt,
-                        null);
+                System.out.println("CommandProcessor: About to call Gemini API...");
+                System.out.println("CommandProcessor: Model: gemini-2.5-flash");
+                System.out.println("CommandProcessor: Prompt length: " + combinedPrompt.length());
+                System.out.println("CommandProcessor: Prompt preview: " + combinedPrompt.substring(0, Math.min(200, combinedPrompt.length())) + "...");
+                
+                GenerateContentResponse response = null;
+                try {
+                    System.out.println("CommandProcessor: Calling geminiClient.models.generateContent()...");
+                    response = geminiClient.models.generateContent(
+                            "gemini-2.5-flash",
+                            combinedPrompt,
+                            null);
+                    System.out.println("CommandProcessor: Gemini API call SUCCESSFUL!");
+                    System.out.println("CommandProcessor: Response is null? " + (response == null));
+                } catch (Exception apiException) {
+                    System.err.println("CommandProcessor: EXCEPTION calling Gemini API!");
+                    System.err.println("CommandProcessor: Exception type: " + apiException.getClass().getName());
+                    System.err.println("CommandProcessor: Exception message: " + apiException.getMessage());
+                    apiException.printStackTrace();
+                    throw apiException; // Re-throw to be caught by outer catch
+                }
+                
+                if (response == null) {
+                    throw new RuntimeException("Gemini API returned null response");
+                }
 
-                String json = response.text().trim();
+                System.out.println("CommandProcessor: Getting text from response...");
+                String json = null;
+                try {
+                    json = response.text().trim();
+                    System.out.println("CommandProcessor: Received JSON from Gemini (length: " + json.length() + ")");
+                    System.out.println("CommandProcessor: JSON content: " + json);
+                } catch (Exception e) {
+                    System.err.println("CommandProcessor: ERROR getting text from response: " + e.getMessage());
+                    e.printStackTrace();
+                    throw e;
+                }
                 // Clean JSON response - remove markdown code blocks if present
                 if (json.startsWith("```")) {
                     int start = json.indexOf("{");
@@ -90,22 +144,26 @@ public class CommandProcessor {
                 JsonObject obj;
                 try {
                     obj = JsonParser.parseString(json).getAsJsonObject();
+                    System.out.println("CommandProcessor: Parsed JSON successfully");
                 } catch (Exception e) {
                     // If JSON parsing fails, try to execute as a direct command
-                    System.out.println("Failed to parse JSON, attempting direct command execution: " + json);
+                    System.out.println("CommandProcessor: Failed to parse JSON, attempting direct command execution: " + json);
                     String result = ActionExecutor.execute("run_command", command, null);
                     String confirmationPrompt = String.format(
                             "As Archer, confirm you executed the action: '%s'. Be concise and professional.",
                             result);
+                    System.out.println("CommandProcessor: Streaming Gemini response for direct command...");
                     streamGeminiResponse("gemini-2.5-flash", confirmationPrompt, guiCallback);
                     return;
                 }
 
                 String type = obj.has("type") ? obj.get("type").getAsString() : "LOCAL";
+                System.out.println("CommandProcessor: Command type: " + type);
                 
                 // Handle AI commands
                 if (type.equalsIgnoreCase("AI")) {
                     String query = obj.has("query") ? obj.get("query").getAsString() : command;
+                    System.out.println("CommandProcessor: Processing AI command, query: " + query);
                     streamGeminiResponse("gemini-2.5-flash", query, guiCallback);
                     return;
                 }
@@ -116,6 +174,8 @@ public class CommandProcessor {
                 String value = obj.has("value") ? obj.get("value").getAsString() : null;
                 String direction = obj.has("direction") ? obj.get("direction").getAsString() : null;
                 
+                System.out.println("CommandProcessor: Executing LOCAL action: " + action + ", target: " + target);
+                
                 // For adjust_volume, use direction as target if present
                 if (action != null && action.equals("adjust_volume") && direction != null) {
                     target = direction;
@@ -123,33 +183,71 @@ public class CommandProcessor {
 
                 // execute local action
                 String result = ActionExecutor.execute(action, target, value);
+                System.out.println("CommandProcessor: Action executed, result: " + result);
 
                 // generate confirmation
                 String confirmationPrompt = String.format(
                         "As Archer, confirm you executed the action: '%s'. Be concise and professional.",
                         result);
 
+                System.out.println("CommandProcessor: Streaming Gemini confirmation response...");
                 streamGeminiResponse("gemini-2.5-flash", confirmationPrompt, guiCallback);
 
             } catch (Exception e) {
+                System.err.println("CommandProcessor: ===== EXCEPTION IN EXECUTOR THREAD =====");
+                System.err.println("CommandProcessor: Exception type: " + e.getClass().getName());
+                System.err.println("CommandProcessor: Exception message: " + e.getMessage());
                 e.printStackTrace();
-                guiCallback.accept("Archer: Error while processing command: " + e.getMessage());
+                
+                String errorMsg = "Archer: Error while processing command: " + e.getMessage();
+                if (e.getCause() != null) {
+                    errorMsg += " (Cause: " + e.getCause().getMessage() + ")";
+                }
+                guiCallback.accept(errorMsg);
+            } finally {
+                System.out.println("CommandProcessor: ===== EXECUTOR THREAD COMPLETED =====");
             }
         });
+        System.out.println("CommandProcessor: Task submitted to executor, returning from processCommand()");
     }
 
     private void streamGeminiResponse(String model, String prompt, Consumer<String> guiCallback) {
+        System.out.println("CommandProcessor: streamGeminiResponse called, model: " + model);
+        if (guiCallback == null) {
+            System.err.println("CommandProcessor: ERROR - guiCallback is null in streamGeminiResponse!");
+            return;
+        }
         executor.submit(() -> {
             StringBuilder fullResponse = new StringBuilder();
-            geminiClient.models.generateContentStream(model, prompt, null)
-                    .forEach(responsePart -> {
-                        String textChunk = responsePart.text();
-                        if (textChunk != null && !textChunk.isEmpty()) {
-                            fullResponse.append(textChunk);
-                        }
-                    });
-            if (fullResponse.length() > 0) {
-                guiCallback.accept("Archer: " + fullResponse.toString().trim());
+            
+            try {
+                System.out.println("CommandProcessor: Starting Gemini streaming...");
+                geminiClient.models.generateContentStream(model, prompt, null)
+                        .forEach(responsePart -> {
+                            String textChunk = responsePart.text();
+                            if (textChunk != null && !textChunk.isEmpty()) {
+                                fullResponse.append(textChunk);
+                                
+                                // Stream accumulated text in real-time
+                                String responseText = "Archer: " + fullResponse.toString();
+                                System.out.println("CommandProcessor: Streaming chunk, total length: " + fullResponse.length());
+                                guiCallback.accept(responseText);
+                            }
+                        });
+                
+                // Send final complete response (trimmed)
+                if (fullResponse.length() > 0) {
+                    String finalResponse = "Archer: " + fullResponse.toString().trim();
+                    System.out.println("CommandProcessor: Sending final response: " + finalResponse.substring(0, Math.min(100, finalResponse.length())) + "...");
+                    guiCallback.accept(finalResponse);
+                } else {
+                    System.out.println("CommandProcessor: WARNING - No response generated from Gemini!");
+                    guiCallback.accept("Archer: I received your command but couldn't generate a response.");
+                }
+            } catch (Exception e) {
+                System.err.println("CommandProcessor: Error streaming Gemini response: " + e.getMessage());
+                e.printStackTrace();
+                guiCallback.accept("Archer: Error generating response: " + e.getMessage());
             }
         });
     }
