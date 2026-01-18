@@ -12,8 +12,9 @@ public class VoiceTranscription {
     private static final float SAMPLE_RATE = 16000;
     private static final int BUFFER_SIZE = 4096;
     private static final double SILENCE_THRESHOLD = 0.015; // Slightly higher to reduce false positives
-    private static final int SILENCE_DURATION_MS = 3000; // 3 seconds of silence
-    private static final int MIN_SPEECH_DURATION_MS = 500; // Minimum speech before considering silence
+    private static final int SILENCE_DURATION_MS = 1500; // 1.5 seconds of silence (faster response)
+    private static final int MIN_SPEECH_DURATION_MS = 300; // Minimum speech before considering silence (reduced)
+    private static final int PARTIAL_UPDATE_INTERVAL_MS = 100; // Update partial results every 100ms (faster updates)
     
     private TargetDataLine targetLine;
     private Model model;
@@ -82,12 +83,12 @@ public class VoiceTranscription {
                 Recognizer recognizer = new Recognizer(model, (int)SAMPLE_RATE);
                 byte[] buffer = new byte[BUFFER_SIZE];
                 
-                long lastVoiceTime = System.currentTimeMillis();
                 long firstVoiceTime = 0;
+                long lastPartialUpdateTime = 0;
                 boolean hasDetectedSpeech = false;
                 StringBuilder finalText = new StringBuilder();
                 int consecutiveSilentFrames = 0;
-                int requiredSilentFrames = (int)(SILENCE_DURATION_MS / 50); // frames needed for silence
+                int requiredSilentFrames = (int)(SILENCE_DURATION_MS / 10); // frames needed for silence (adjusted for 10ms sleep)
                 
                 while (isListening) {
                     int bytesRead = targetLine.read(buffer, 0, buffer.length);
@@ -98,34 +99,85 @@ public class VoiceTranscription {
                     
                     double amplitude = calculateAmplitude(buffer, bytesRead);
                     
+                    // Always process audio through recognizer, even during silence
+                    boolean hasResult = recognizer.acceptWaveForm(buffer, bytesRead);
+                    
                     if (amplitude > SILENCE_THRESHOLD) {
                         consecutiveSilentFrames = 0;
                         
                         if (!hasDetectedSpeech) {
                             firstVoiceTime = System.currentTimeMillis();
                             hasDetectedSpeech = true;
+                            lastPartialUpdateTime = System.currentTimeMillis();
                             System.out.println("Speech detected, starting transcription...");
                         }
-                        lastVoiceTime = System.currentTimeMillis();
                         
-                        if (recognizer.acceptWaveForm(buffer, bytesRead)) {
+                        // Handle final results (complete phrases)
+                        if (hasResult) {
                             String resultJson = recognizer.getResult();
                             String txt = extractText(resultJson);
                             if (!txt.isBlank()) {
                                 txt = cleanTranscription(txt);
                                 finalText.append(txt).append(" ");
-                                System.out.println("Recognized: " + txt);
+                                System.out.println("Recognized (finalized phrase): " + txt);
+                                // Send accumulated text so far (finalized + current partial)
+                                String accumulated = finalText.toString().trim();
+                                String partialJson = recognizer.getPartialResult();
+                                String partial = extractText(partialJson);
+                                if (!partial.isBlank()) {
+                                    partial = cleanTranscription(partial);
+                                    accumulated = (accumulated + " " + partial).trim();
+                                }
+                                callback.accept(accumulated, false);
                             }
-                        } else {
+                        }
+                        
+                        // Send partial results more frequently (every PARTIAL_UPDATE_INTERVAL_MS)
+                        long currentTime = System.currentTimeMillis();
+                        if (hasDetectedSpeech && (currentTime - lastPartialUpdateTime) >= PARTIAL_UPDATE_INTERVAL_MS) {
                             String partialJson = recognizer.getPartialResult();
                             String partial = extractText(partialJson);
-                            if (!partial.isBlank() && hasDetectedSpeech) {
+                            if (!partial.isBlank()) {
                                 partial = cleanTranscription(partial);
-                                callback.accept(partial, false);
+                                // Combine finalized text with current partial for full accumulated text
+                                String accumulated = finalText.toString().trim();
+                                if (!accumulated.isEmpty() && !partial.isEmpty()) {
+                                    accumulated = (accumulated + " " + partial).trim();
+                                } else if (!partial.isEmpty()) {
+                                    accumulated = partial;
+                                }
+                                if (!accumulated.isEmpty()) {
+                                    System.out.println("Partial (accumulated): " + accumulated);
+                                    callback.accept(accumulated, false);
+                                }
+                                lastPartialUpdateTime = currentTime;
                             }
                         }
                     } else {
                         consecutiveSilentFrames++;
+                        
+                        // Even during silence, check for partial results if we've detected speech
+                        if (hasDetectedSpeech) {
+                            long currentTime = System.currentTimeMillis();
+                            if ((currentTime - lastPartialUpdateTime) >= PARTIAL_UPDATE_INTERVAL_MS) {
+                                String partialJson = recognizer.getPartialResult();
+                                String partial = extractText(partialJson);
+                                if (!partial.isBlank()) {
+                                    partial = cleanTranscription(partial);
+                                    // Combine finalized text with current partial
+                                    String accumulated = finalText.toString().trim();
+                                    if (!accumulated.isEmpty() && !partial.isEmpty()) {
+                                        accumulated = (accumulated + " " + partial).trim();
+                                    } else if (!partial.isEmpty()) {
+                                        accumulated = partial;
+                                    }
+                                    if (!accumulated.isEmpty()) {
+                                        callback.accept(accumulated, false);
+                                    }
+                                    lastPartialUpdateTime = currentTime;
+                                }
+                            }
+                        }
                     }
                     
                     // Only consider ending if we've had enough speech
@@ -143,21 +195,42 @@ public class VoiceTranscription {
                         String finalTxt = extractText(finalJson);
                         if (!finalTxt.isBlank()) {
                             finalTxt = cleanTranscription(finalTxt);
-                            finalText.append(finalTxt);
+                            finalText.append(finalTxt).append(" ");
+                        }
+                        
+                        // Also get the current partial result to include the very latest text
+                        String partialJson = recognizer.getPartialResult();
+                        String partial = extractText(partialJson);
+                        if (!partial.isBlank()) {
+                            partial = cleanTranscription(partial);
+                            // Only append if it's different from what we already have
+                            String currentAccumulated = finalText.toString().trim();
+                            if (!currentAccumulated.contains(partial) || !partial.equals(finalTxt)) {
+                                finalText.append(partial).append(" ");
+                            }
                         }
                         
                         String completeText = finalText.toString().trim();
                         if (!completeText.isEmpty()) {
-                            System.out.println("Final text: " + completeText);
+                            System.out.println("Final text (with latest partial): " + completeText);
                             callback.accept(completeText, true);
+                        } else {
+                            System.out.println("WARNING: Final text is empty!");
                         }
                         
-                        // Signal session end
-                        callback.accept("__LISTENING_SESSION_END__", true);
-                        break;
+                        // Reset state for next command but keep listening
+                        hasDetectedSpeech = false;
+                        finalText.setLength(0);
+                        consecutiveSilentFrames = 0;
+                        lastPartialUpdateTime = 0;
+                        firstVoiceTime = 0;
+                        
+                        // Signal command finalized (but session continues)
+                        callback.accept("__COMMAND_FINALIZED__", true);
+                        // Don't break - keep listening!
                     }
                     
-                    Thread.sleep(50);
+                    Thread.sleep(10); // Reduced sleep time for faster processing
                 }
                 
                 recognizer.close();
